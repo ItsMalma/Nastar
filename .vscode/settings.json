@@ -1,0 +1,5 @@
+{
+  "editor.formatOnSave": true,
+  "dotnet.defaultSolution": "Nastar.sln",
+  "omnisharp.enableEditorConfigSupport": true
+}
