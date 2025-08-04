@@ -47,9 +47,15 @@ public class NastarApp
         _concurrencyLimiter = new(MaxConcurrency);
     }
 
-    private void AddRoute(string method, string path, RouteHandler handler)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="handler"></param>
+    public NastarApp Get(string path, RouteHandler handler)
     {
-        _router.Add(path, new(method, handler));
+        _router.Get(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -57,9 +63,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Get(string path, RouteHandler handler)
+    public NastarApp Post(string path, RouteHandler handler)
     {
-        AddRoute("GET", path, handler);
+        _router.Post(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -67,9 +74,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Post(string path, RouteHandler handler)
+    public NastarApp Put(string path, RouteHandler handler)
     {
-        AddRoute("POST", path, handler);
+        _router.Put(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -77,9 +85,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Put(string path, RouteHandler handler)
+    public NastarApp Patch(string path, RouteHandler handler)
     {
-        AddRoute("PUT", path, handler);
+        _router.Patch(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -87,9 +96,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Patch(string path, RouteHandler handler)
+    public NastarApp Delete(string path, RouteHandler handler)
     {
-        AddRoute("PATCH", path, handler);
+        _router.Delete(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -97,9 +107,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Delete(string path, RouteHandler handler)
+    public NastarApp Options(string path, RouteHandler handler)
     {
-        AddRoute("DELETE", path, handler);
+        _router.Options(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -107,9 +118,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Options(string path, RouteHandler handler)
+    public NastarApp Head(string path, RouteHandler handler)
     {
-        AddRoute("OPTIONS", path, handler);
+        _router.Head(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -117,9 +129,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Head(string path, RouteHandler handler)
+    public NastarApp Trace(string path, RouteHandler handler)
     {
-        AddRoute("HEAD", path, handler);
+        _router.Trace(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -127,9 +140,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Trace(string path, RouteHandler handler)
+    public NastarApp Connect(string path, RouteHandler handler)
     {
-        AddRoute("TRACE", path, handler);
+        _router.Connect(path, handler);
+        return this;
     }
 
     /// <summary>
@@ -137,21 +151,17 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public void Connect(string path, RouteHandler handler)
+    public NastarApp All(string path, RouteHandler handler)
     {
-        AddRoute("CONNECT", path, handler);
+        _router.All(path, handler);
+        return this;
     }
 
     private object? Dispatch(HttpListenerRequest request)
     {
-        Uri url = request.Url!;
-        string path = url.AbsolutePath;
-
-        Route? route = _router.Match(path, out Dictionary<string, string> parameters);
-
-        return route != null && route.Method.Equals(request.HttpMethod, StringComparison.OrdinalIgnoreCase)
-            ? route.Handler(request)
-            : null;
+        return _router
+            .Match(request.HttpMethod, request.Url!.AbsolutePath, out Dictionary<string, string> parameters)?
+            .Invoke(request);
     }
 
     private async Task Filter(HttpListenerResponse response, object? result, CancellationToken cancellationToken)
@@ -209,8 +219,10 @@ public class NastarApp
             context.Response.ContentLength64 = encodedResult.Length;
             await context.Response.OutputStream.WriteAsync(encodedResult, _cancellationTokenSource.Token);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.Error.WriteLine(ex);
+
             byte[] encodedResult = Encoding.UTF8.GetBytes("Internal Server Error");
 
             context.Response.StatusCode = 500;
