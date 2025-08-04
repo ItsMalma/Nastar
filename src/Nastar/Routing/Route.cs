@@ -20,7 +20,7 @@ internal partial class Route
             current.Handlers[method] = handler;
         }
 
-        List<string> segments = SplitPath(path);
+        List<string> segments = RouteHelper.SplitPath(path);
 
         foreach (string segment in segments)
         {
@@ -41,14 +41,19 @@ internal partial class Route
                 current = current.Children[segment];
             }
         }
+
+        if (!current.Handlers.ContainsKey(method))
+        {
+            current.Handlers[method] = handler;
+        }
     }
 
-    internal RouteHandler? Search(string method, string path, out Dictionary<string, string> parameters)
+    internal RoutingResult? Search(string method, string path)
     {
         Route current = this;
-        parameters = [];
+        Dictionary<string, string> parameters = [];
 
-        foreach (string segment in SplitPath(path))
+        foreach (string segment in RouteHelper.SplitPath(path))
         {
             if (current.Children.TryGetValue(segment, out Route? next) && next != null)
             {
@@ -78,12 +83,12 @@ internal partial class Route
 
                 if (key.StartsWith(':'))
                 {
-                    Regex regexPattern = GetRegexPattern(key);
+                    Regex regexPattern = new(RouteHelper.GetParameterPattern(key));
                     Match match = regexPattern.Match(segment);
 
                     if (match.Success)
                     {
-                        parameters[GetParameterName(key)] = match.Value;
+                        parameters[RouteHelper.GetParameterName(key)] = match.Value;
                         current = current.Children[key];
                         isParameterMatch = true;
                         break;
@@ -102,44 +107,8 @@ internal partial class Route
         RouteHandler? handler = current.Handlers.GetValueOrDefault("*")
             ?? current.Handlers.FirstOrDefault(h => h.Key.Equals(method, StringComparison.OrdinalIgnoreCase)).Value;
 
-        return handler;
-    }
-
-    [GeneratedRegex(@"^\:.+?\{(.+)\}$")]
-    internal static partial Regex SearchPathPatternRegex();
-
-    [GeneratedRegex(@"(.+)")]
-    internal static partial Regex NoPatternPathRegex();
-
-    internal static Regex GetRegexPattern(string path)
-    {
-        Match match = SearchPathPatternRegex().Match(path);
-
-        return match.Success
-            ? new($"({match.Value})")
-            : NoPatternPathRegex();
-    }
-
-    [GeneratedRegex(@"^\:([^\{\}]+)")]
-    internal static partial Regex SearchParameterNameRegex();
-
-    internal static string GetParameterName(string path)
-    {
-        return SearchParameterNameRegex().Match(path).Value;
-    }
-
-    internal static List<string> SplitPath(string path)
-    {
-        List<string> segments = [];
-
-        foreach (string segment in path.Split('/'))
-        {
-            if (segment.Length > 0)
-            {
-                segments.Add(segment);
-            }
-        }
-
-        return segments;
+        return handler != null
+            ? new(handler, parameters)
+            : null;
     }
 }

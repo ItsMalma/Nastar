@@ -9,7 +9,7 @@ namespace Nastar;
 /// <summary>
 /// 
 /// </summary>
-public class NastarApp
+public class NastarApp : IRouter
 {
     /// <summary>
     /// 
@@ -51,11 +51,10 @@ public class NastarApp
     /// 
     /// </summary>
     /// <param name="path"></param>
-    /// <param name="handler"></param>
-    public NastarApp Get(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IPrefixedRouter Prefix(string path)
     {
-        _router.Get(path, handler);
-        return this;
+        return _router.Prefix(path);
     }
 
     /// <summary>
@@ -63,10 +62,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp Post(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Get(string path, RouteHandler handler)
     {
-        _router.Post(path, handler);
-        return this;
+        return _router.Get(path, handler);
     }
 
     /// <summary>
@@ -74,10 +73,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp Put(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Post(string path, RouteHandler handler)
     {
-        _router.Put(path, handler);
-        return this;
+        return _router.Post(path, handler);
     }
 
     /// <summary>
@@ -85,10 +84,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp Patch(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Put(string path, RouteHandler handler)
     {
-        _router.Patch(path, handler);
-        return this;
+        return _router.Put(path, handler);
     }
 
     /// <summary>
@@ -96,10 +95,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp Delete(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Patch(string path, RouteHandler handler)
     {
-        _router.Delete(path, handler);
-        return this;
+        return _router.Patch(path, handler);
     }
 
     /// <summary>
@@ -107,10 +106,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp Options(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Delete(string path, RouteHandler handler)
     {
-        _router.Options(path, handler);
-        return this;
+        return _router.Delete(path, handler);
     }
 
     /// <summary>
@@ -118,10 +117,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp Head(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Options(string path, RouteHandler handler)
     {
-        _router.Head(path, handler);
-        return this;
+        return _router.Options(path, handler);
     }
 
     /// <summary>
@@ -129,10 +128,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp Trace(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Head(string path, RouteHandler handler)
     {
-        _router.Trace(path, handler);
-        return this;
+        return _router.Head(path, handler);
     }
 
     /// <summary>
@@ -140,10 +139,10 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp Connect(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Trace(string path, RouteHandler handler)
     {
-        _router.Connect(path, handler);
-        return this;
+        return _router.Trace(path, handler);
     }
 
     /// <summary>
@@ -151,17 +150,29 @@ public class NastarApp
     /// </summary>
     /// <param name="path"></param>
     /// <param name="handler"></param>
-    public NastarApp All(string path, RouteHandler handler)
+    /// <returns></returns>
+    public IRouter Connect(string path, RouteHandler handler)
     {
-        _router.All(path, handler);
-        return this;
+        return _router.Connect(path, handler);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="handler"></param>
+    /// <returns></returns>
+    public IRouter All(string path, RouteHandler handler)
+    {
+        return _router.All(path, handler);
     }
 
     private object? Dispatch(HttpListenerRequest request)
     {
         return _router
-            .Match(request.HttpMethod, request.Url!.AbsolutePath, out Dictionary<string, string> parameters)?
-            .Invoke(request);
+            .Match(request.HttpMethod, request.Url!.AbsolutePath)?
+            .Handler
+                .Invoke(request);
     }
 
     private async Task Filter(HttpListenerResponse response, object? result, CancellationToken cancellationToken)
