@@ -14,6 +14,7 @@ dotnet add package Nastar
 using Nastar;
 
 NastarApp app = new();
-app.Get("/", () => Task.FromResult("Hello, World!"));
+app.Get("/text", (request) => "Hello, World!");
+app.Get("/json", (request) => new { Message = "Hello, World!" });
 app.Run();
 ```

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 
 using Nastar.Routing;
 
@@ -10,10 +11,6 @@ namespace Nastar;
 /// </summary>
 public class NastarApp
 {
-    private readonly HttpListener _listener = new();
-
-    private readonly Router _router = new();
-
     /// <summary>
     /// 
     /// </summary>
@@ -23,6 +20,32 @@ public class NastarApp
     /// 
     /// </summary>
     public int Port { get; set; } = 3000;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public int MaxConcurrency { get; set; } = 100;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    private readonly HttpListener _listener = new();
+
+    private readonly Router _router = new();
+
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
+
+    private SemaphoreSlim _concurrencyLimiter;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public NastarApp()
+    {
+        _concurrencyLimiter = new(MaxConcurrency);
+    }
 
     private void AddRoute(string method, string path, RouteHandler handler)
     {
@@ -119,46 +142,108 @@ public class NastarApp
         AddRoute("CONNECT", path, handler);
     }
 
-    private async Task Dispatch(HttpListenerContext context)
+    private object? Dispatch(HttpListenerRequest request)
     {
-        HttpListenerRequest request = context.Request;
-        HttpListenerResponse response = context.Response;
-
-        response.ContentType = "text/plain";
-        response.ContentEncoding = Encoding.UTF8;
-
         Uri url = request.Url!;
         string path = url.AbsolutePath;
 
         Route? route = _router.Match(path, out Dictionary<string, string> parameters);
 
-        string responseText = "OK";
+        return route != null && route.Method.Equals(request.HttpMethod, StringComparison.OrdinalIgnoreCase)
+            ? route.Handler(request)
+            : null;
+    }
 
-        if (route != null && route.Method.Equals(request.HttpMethod, StringComparison.OrdinalIgnoreCase))
+    private async Task Filter(HttpListenerResponse response, object? result, CancellationToken cancellationToken)
+    {
+        response.ContentEncoding = Encoding.UTF8;
+        response.StatusCode = 200;
+
+        if (result is string stringResult)
         {
-            responseText = await route.Handler();
-            response.StatusCode = 200;
+            byte[] encodedStringResult = Encoding.UTF8.GetBytes(stringResult);
+
+            response.ContentType = "text/plain";
+            response.ContentLength64 = encodedStringResult.Length;
+            await response.OutputStream.WriteAsync(encodedStringResult, cancellationToken);
+        }
+        else if (result != null)
+        {
+            string serializedResult = JsonSerializer.Serialize(result);
+            byte[] encodedResult = Encoding.UTF8.GetBytes(serializedResult);
+
+            response.ContentType = "application/json";
+            response.ContentLength64 = encodedResult.Length;
+            await response.OutputStream.WriteAsync(encodedResult, cancellationToken);
         }
         else
         {
-            responseText = await NotFound();
+            byte[] encodedResult = Encoding.UTF8.GetBytes("Not Found");
+
             response.StatusCode = 404;
+            response.ContentType = "text/plain";
+            response.ContentLength64 = encodedResult.Length;
+            await response.OutputStream.WriteAsync(encodedResult, cancellationToken);
         }
-
-        response.ContentLength64 = responseText.Length;
-
-        await response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(responseText).AsMemory(0, responseText.Length));
     }
 
-    private async Task Handle()
+    private async Task HandleRequest(HttpListenerContext context)
     {
-        while (true)
+        await _concurrencyLimiter.WaitAsync(_cancellationTokenSource.Token);
+
+        try
         {
-            HttpListenerContext context = await _listener.GetContextAsync();
+            CancellationTokenSource timeoutCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(_cancellationTokenSource.Token);
+            timeoutCancellationTokenSource.CancelAfter(RequestTimeout);
 
-            await Dispatch(context);
+            await Filter(context.Response, Dispatch(context.Request), timeoutCancellationTokenSource.Token)
+                .WaitAsync(timeoutCancellationTokenSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            byte[] encodedResult = Encoding.UTF8.GetBytes("Request Timeout");
 
+            context.Response.StatusCode = 408;
+            context.Response.ContentEncoding = Encoding.UTF8;
+            context.Response.ContentType = "text/plain";
+            context.Response.ContentLength64 = encodedResult.Length;
+            await context.Response.OutputStream.WriteAsync(encodedResult, _cancellationTokenSource.Token);
+        }
+        catch (Exception)
+        {
+            byte[] encodedResult = Encoding.UTF8.GetBytes("Internal Server Error");
+
+            context.Response.StatusCode = 500;
+            context.Response.ContentEncoding = Encoding.UTF8;
+            context.Response.ContentType = "text/plain";
+            context.Response.ContentLength64 = encodedResult.Length;
+            await context.Response.OutputStream.WriteAsync(encodedResult, _cancellationTokenSource.Token);
+        }
+        finally
+        {
             context.Response.Close();
+            _concurrencyLimiter.Release();
+        }
+    }
+
+    private async Task HandleRequests()
+    {
+        while (!_cancellationTokenSource.Token.IsCancellationRequested)
+        {
+            try
+            {
+                HttpListenerContext context = await _listener.GetContextAsync();
+
+                _ = Task.Run(async () => await HandleRequest(context), _cancellationTokenSource.Token);
+            }
+            catch (HttpListenerException ex) when (ex.ErrorCode == 995)
+            {
+                break;
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
         }
     }
 
@@ -167,21 +252,24 @@ public class NastarApp
     /// </summary>
     public void Run()
     {
-        _listener.Prefixes.Add($"http://{Host}:{Port}/");
-        _listener.Start();
-
-        Task[] tasks = new Task[Environment.ProcessorCount];
-        for (int i = 0; i < tasks.Length; i++)
+        try
         {
-            tasks[i] = Handle();
+            _concurrencyLimiter = new(MaxConcurrency);
+
+            _listener.Prefixes.Add($"http://{Host}:{Port}/");
+            _listener.Start();
+
+            HandleRequests().GetAwaiter().GetResult();
         }
-        Task.WaitAll(tasks);
+        finally
+        {
+            _cancellationTokenSource.Cancel();
 
-        _listener.Close();
-    }
+            _listener.Stop();
+            _listener.Close();
 
-    private static Task<string> NotFound()
-    {
-        return Task.FromResult("Not Found");
+            _concurrencyLimiter.Dispose();
+            _cancellationTokenSource.Dispose();
+        }
     }
 }
